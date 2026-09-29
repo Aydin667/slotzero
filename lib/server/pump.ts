@@ -51,12 +51,14 @@ export async function computeNewCurveBuyAmount(solLamports: bigint): Promise<{
   totalSupply: BN;
 }> {
   const { global, feeConfig } = await getPumpGlobalState();
+  const { NATIVE_MINT } = await import("@solana/spl-token");
   const tokensRaw = getBuyTokenAmountFromSolAmount({
     global,
     feeConfig,
     mintSupply: null,
     bondingCurve: null,
     amount: new BN(solLamports.toString()),
+    quoteMint: NATIVE_MINT,
   });
   return { tokensRaw, totalSupply: global.tokenTotalSupply };
 }

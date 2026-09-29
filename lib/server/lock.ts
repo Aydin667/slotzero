@@ -5,9 +5,8 @@ import "server-only";
  * whose cancel/update modes are NONE — uncancellable, immutable, visible on
  * lock.jup.ag and any explorer.
  */
-import { AnchorProvider, BN, Program, Wallet } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import {
-  Keypair,
   PublicKey,
   SystemProgram,
   type TransactionInstruction,
@@ -45,13 +44,9 @@ function eventAuthorityPda(): PublicKey {
 }
 
 function getLockerProgram(): Program {
-  // Read-only provider: we only build instructions, never send through Anchor.
-  const provider = new AnchorProvider(
-    getConnection(),
-    new Wallet(Keypair.generate()),
-    { commitment: "confirmed" },
-  );
-  return new Program(lockerIdl as never, provider);
+  // Connection-only provider: we only build instructions and fetch accounts,
+  // never send through Anchor, so no wallet is needed.
+  return new Program(lockerIdl as never, { connection: getConnection() });
 }
 
 export interface VestingSchedule {

@@ -368,17 +368,7 @@ export async function executeLaunch(
   session.consumed = true;
 
   if (env.dryRun) {
-    const connection = getConnection();
-    const sim = await connection.simulateTransaction(tx1, {
-      sigVerify: false,
-      replaceRecentBlockhash: true,
-    });
-    if (sim.value.err) {
-      throw new LaunchError(
-        "SIMULATION_FAILED",
-        `Dry-run simulation failed: ${JSON.stringify(sim.value.err)} — logs: ${(sim.value.logs ?? []).slice(-5).join(" | ")}`,
-      );
-    }
+    await simulateDryRun([tx1, tx2, finalTx3]);
     const fakeBundleId = `dryrun-${session.id}`;
     session.bundleId = fakeBundleId;
     rememberBundle(fakeBundleId, session.mint.publicKey.toBase58());
@@ -389,6 +379,78 @@ export async function executeLaunch(
   session.bundleId = bundleId;
   rememberBundle(bundleId, session.mint.publicKey.toBase58());
   return { bundleId, state: "pending" };
+}
+
+/**
+ * Dry-run validation. Prefers the RPC's simulateBundle (Helius/Jito RPCs) so
+ * the whole 3-tx chain is validated statefully; falls back to simulating tx1
+ * alone (create+buy) on RPCs without bundle simulation.
+ */
+async function simulateDryRun(txs: VersionedTransaction[]): Promise<void> {
+  const connection = getConnection();
+  try {
+    const res = await fetch(env.rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "simulateBundle",
+        params: [
+          {
+            encodedTransactions: txs.map((t) =>
+              Buffer.from(t.serialize()).toString("base64"),
+            ),
+          },
+          {
+            skipSigVerify: true,
+            replaceRecentBlockhash: true,
+            encoding: "base64",
+          },
+        ],
+      }),
+    });
+    const json = (await res.json()) as {
+      result?: {
+        value?: {
+          summary?: unknown;
+          transactionResults?: Array<{ err: unknown; logs?: string[] }>;
+        };
+      };
+      error?: { message?: string; code?: number };
+    };
+    if (!json.error && json.result?.value) {
+      const summary = json.result.value.summary;
+      const failed =
+        summary && summary !== "succeeded" && typeof summary === "object";
+      if (failed) {
+        const results = json.result.value.transactionResults ?? [];
+        const lastLogs = results
+          .flatMap((r) => r.logs ?? [])
+          .slice(-6)
+          .join(" | ");
+        throw new LaunchError(
+          "SIMULATION_FAILED",
+          `Bundle simulation failed: ${JSON.stringify(summary).slice(0, 300)} — logs: ${lastLogs}`,
+        );
+      }
+      return; // full bundle simulated OK
+    }
+    // RPC lacks simulateBundle — fall through to single-tx simulation
+  } catch (e) {
+    if (e instanceof LaunchError) throw e;
+    // network hiccup or unsupported method — fall back
+  }
+  const sim = await connection.simulateTransaction(txs[0], {
+    sigVerify: false,
+    replaceRecentBlockhash: true,
+  });
+  if (sim.value.err) {
+    throw new LaunchError(
+      "SIMULATION_FAILED",
+      `Dry-run simulation failed: ${JSON.stringify(sim.value.err)} — logs: ${(sim.value.logs ?? []).slice(-5).join(" | ")}`,
+    );
+  }
 }
 
 async function rebuildScheduleAttestation(

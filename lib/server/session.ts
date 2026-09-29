@@ -33,7 +33,14 @@ export interface LaunchSession {
 }
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
-const sessions = new Map<string, LaunchSession>();
+
+// Next.js bundles each API route separately, so plain module state is not
+// shared across routes. globalThis is shared within the server process.
+const g = globalThis as unknown as {
+  __sz_sessions?: Map<string, LaunchSession>;
+  __sz_bundles?: Map<string, { mint: string; at: number }>;
+};
+const sessions = (g.__sz_sessions ??= new Map<string, LaunchSession>());
 
 function sweep() {
   const now = Date.now();
@@ -63,7 +70,10 @@ export function getSession(id: string): LaunchSession | undefined {
 }
 
 /** Bundle-id → mint mapping for status polling after the session expires. */
-const bundleMints = new Map<string, { mint: string; at: number }>();
+const bundleMints = (g.__sz_bundles ??= new Map<
+  string,
+  { mint: string; at: number }
+>());
 
 export function rememberBundle(bundleId: string, mint: string) {
   bundleMints.set(bundleId, { mint, at: Date.now() });
